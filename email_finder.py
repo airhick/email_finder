@@ -140,7 +140,7 @@ class EmailFinder:
                 logger.debug(f"Type de contenu non-HTML: {content_type}")
                 return None, None
             
-            soup = BeautifulSoup(response.content, 'lxml')
+            soup = BeautifulSoup(response.content, 'html.parser')
             
             # Extraire le texte brut
             text_content = soup.get_text()
