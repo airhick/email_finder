@@ -1,0 +1,1928 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Passiv Leads - Free Web Scraping Platform</title>
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        body {
+            font-family: "Helvetica Neue", Helvetica, Arial, sans-serif;
+            background: #1a1a1a;
+            color: #e0e0e0;
+            overflow-x: hidden;
+            font-size: 13px;
+            line-height: 1.5;
+        }
+        /* Header */
+        .header {
+            background: #1a1a1a;
+            color: #ffffff;
+            padding: 0;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.3);
+            position: sticky;
+            top: 0;
+            z-index: 1000;
+            border-bottom: 1px solid #ffffff;
+        }
+        .header-top {
+            padding: 20px 40px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            border-bottom: 1px solid #ffffff;
+        }
+        .logo {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            font-size: 18px;
+            font-weight: 500;
+            letter-spacing: 0.5px;
+        }
+        .logo-icon {
+            width: 40px;
+            height: 40px;
+            background: transparent;
+            border-radius: 12px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            overflow: hidden;
+        }
+        .logo-icon img {
+            width: 100%;
+            height: 100%;
+            object-fit: contain;
+        }
+        .free-badge {
+            background: #ffffff;
+            color: #000000;
+            padding: 3px 10px;
+            border-radius: 12px;
+            font-size: 10px;
+            font-weight: 500;
+            margin-left: 12px;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+        .header-actions {
+            display: flex;
+            gap: 12px;
+            align-items: center;
+        }
+        .header-actions a {
+            color: #ffffff;
+            text-decoration: none;
+            padding: 6px 14px;
+            border-radius: 12px;
+            transition: background 0.2s;
+            font-size: 12px;
+            border: 1px solid #ffffff;
+        }
+        .header-actions a:hover {
+            background: #ffffff;
+            color: #000000;
+        }
+        .tabs {
+            display: flex;
+            background: #2d2d2d;
+            padding: 0 40px;
+        }
+        .tab {
+            padding: 12px 24px;
+            cursor: pointer;
+            border-bottom: 2px solid transparent;
+            transition: all 0.2s;
+            font-weight: 400;
+            color: #b0b0b0;
+            font-size: 12px;
+            letter-spacing: 0.3px;
+            border-radius: 12px 12px 0 0;
+        }
+        .tab:hover {
+            background: #2d2d2d;
+            color: #ffffff;
+        }
+        .tab.active {
+            border-bottom-color: #ffffff;
+            color: #ffffff;
+            background: #2d2d2d;
+        }
+        /* Main Layout */
+        .main-container {
+            display: flex;
+            min-height: calc(100vh - 120px);
+        }
+        /* Sidebar */
+        .sidebar {
+            width: 240px;
+            background: #1a1a1a;
+            border-right: 1px solid #ffffff;
+            padding: 30px 0;
+            position: sticky;
+            top: 120px;
+            height: calc(100vh - 120px);
+            overflow-y: auto;
+        }
+        .sidebar-section {
+            margin-bottom: 40px;
+        }
+        .sidebar-title {
+            padding: 0 24px 14px;
+            font-size: 10px;
+            font-weight: 500;
+            color: #888;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+        }
+        .sidebar-item {
+            padding: 10px 24px;
+            cursor: pointer;
+            transition: all 0.2s;
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            color: #b0b0b0;
+            border-left: 2px solid transparent;
+            font-size: 12px;
+            border-radius: 0 12px 12px 0;
+        }
+        .sidebar-item:hover {
+            background: #2d2d2d;
+            color: #ffffff;
+        }
+        .sidebar-item.active {
+            background: #2d2d2d;
+            color: #ffffff;
+            border-left-color: #ffffff;
+            font-weight: 500;
+        }
+        .sidebar-item-icon {
+            width: 18px;
+            height: 18px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            flex-shrink: 0;
+        }
+        .sidebar-item-icon svg {
+            width: 100%;
+            height: 100%;
+            stroke: #ffffff;
+            fill: none;
+            stroke-width: 2;
+            stroke-linecap: round;
+            stroke-linejoin: round;
+        }
+        .sidebar-item.coming-soon {
+            opacity: 0.4;
+            cursor: not-allowed;
+        }
+        .coming-soon-badge {
+            margin-left: auto;
+            font-size: 9px;
+            background: #2d2d2d;
+            color: #ffffff;
+            padding: 2px 6px;
+            border-radius: 12px;
+            font-weight: 500;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            border: 1px solid #ffffff;
+        }
+        /* Content Area */
+        .content {
+            flex: 1;
+            padding: 40px 50px;
+            max-width: 1200px;
+        }
+        .content-section {
+            display: none;
+        }
+        .content-section.active {
+            display: block;
+        }
+        .page-header {
+            margin-bottom: 40px;
+        }
+        .page-title {
+            font-size: 22px;
+            font-weight: 500;
+            color: #e0e0e0;
+            margin-bottom: 12px;
+            letter-spacing: 0.3px;
+        }
+        .page-description {
+            font-size: 13px;
+            color: #b0b0b0;
+            line-height: 1.6;
+        }
+        .card {
+            background: #1a1a1a;
+            border-radius: 16px;
+            padding: 40px;
+            border: 1px solid #ffffff;
+            margin-bottom: 30px;
+        }
+        .card-title {
+            font-size: 15px;
+            font-weight: 500;
+            margin-bottom: 20px;
+            color: #e0e0e0;
+            letter-spacing: 0.3px;
+        }
+        .upload-section {
+            border: 2px dashed #ffffff;
+            border-radius: 16px;
+            padding: 50px;
+            text-align: center;
+            margin-bottom: 40px;
+            transition: all 0.2s;
+            background: #1a1a1a;
+        }
+        .upload-section:hover {
+            border-color: #ffffff;
+            background: #2d2d2d;
+        }
+        .upload-section.dragover {
+            border-color: #ffffff;
+            background: #3d3d3d;
+        }
+        input[type="file"] {
+            display: none;
+        }
+        .file-label {
+            display: inline-block;
+            padding: 10px 20px;
+            background: #ffffff;
+            color: #000000;
+            border-radius: 12px;
+            cursor: pointer;
+            font-size: 12px;
+            transition: all 0.2s;
+            font-weight: 500;
+            letter-spacing: 0.3px;
+            text-transform: uppercase;
+            border: 1px solid #ffffff;
+        }
+        .file-label:hover {
+            background: #2d2d2d;
+            color: #ffffff;
+        }
+        .file-name {
+            margin-top: 16px;
+            color: #b0b0b0;
+            font-size: 11px;
+        }
+        .form-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 24px;
+            margin: 30px 0;
+        }
+        .form-group {
+            display: flex;
+            flex-direction: column;
+        }
+        .form-group label {
+            margin-bottom: 10px;
+            color: #e0e0e0;
+            font-weight: 400;
+            font-size: 11px;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+        .form-group input, .form-group select {
+            padding: 10px 14px;
+            border: 1px solid #ffffff;
+            border-radius: 12px;
+            font-size: 12px;
+            transition: all 0.2s;
+            background: #1a1a1a;
+            color: #ffffff;
+            font-family: "Helvetica Neue", Helvetica, Arial, sans-serif;
+        }
+        .form-group input:focus, .form-group select:focus {
+            outline: none;
+            border-color: #ffffff;
+            background: #2d2d2d;
+        }
+        .btn-primary {
+            width: 100%;
+            padding: 12px;
+            background: #ffffff;
+            color: #000000;
+            border: 1px solid #ffffff;
+            border-radius: 12px;
+            font-size: 12px;
+            font-weight: 500;
+            cursor: pointer;
+            transition: all 0.2s;
+            margin-top: 30px;
+            letter-spacing: 0.5px;
+            text-transform: uppercase;
+        }
+        .btn-primary:hover:not(:disabled) {
+            background: #2d2d2d;
+            color: #ffffff;
+        }
+        .btn-primary:disabled {
+            background: #3d3d3d;
+            color: #666;
+            border-color: #3d3d3d;
+            cursor: not-allowed;
+        }
+        .loading {
+            display: none;
+            text-align: center;
+            margin: 30px 0;
+            color: #ffffff;
+        }
+        .loading.active {
+            display: block;
+        }
+        .spinner {
+            border: 2px solid #3d3d3d;
+            border-top: 2px solid #ffffff;
+            border-radius: 50%;
+            width: 32px;
+            height: 32px;
+            animation: spin 1s linear infinite;
+            margin: 0 auto 12px;
+        }
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+        .alert {
+            padding: 16px 20px;
+            border-radius: 12px;
+            margin: 30px 0;
+            display: none;
+            font-size: 12px;
+            border: 1px solid #ffffff;
+        }
+        .alert.active {
+            display: block;
+        }
+        .alert-error {
+            background: #1a1a1a;
+            color: #ffffff;
+            border-left: 3px solid #ffffff;
+        }
+        .alert-success {
+            background: #1a1a1a;
+            color: #ffffff;
+            border-left: 3px solid #ffffff;
+        }
+        .alert-info {
+            background: #1a1a1a;
+            color: #ffffff;
+            border-left: 3px solid #ffffff;
+        }
+        .download-link {
+            display: inline-block;
+            margin-top: 14px;
+            padding: 10px 18px;
+            background: #ffffff;
+            color: #000000;
+            text-decoration: none;
+            border-radius: 12px;
+            transition: all 0.2s;
+            font-weight: 500;
+            font-size: 11px;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            border: 1px solid #ffffff;
+        }
+        .download-link:hover {
+            background: #2d2d2d;
+            color: #ffffff;
+        }
+        .info-box {
+            background: #1a1a1a;
+            border-left: 3px solid #ffffff;
+            padding: 24px;
+            margin: 30px 0;
+            border-radius: 12px;
+            border: 1px solid #ffffff;
+        }
+        .info-box h3 {
+            margin-bottom: 14px;
+            color: #e0e0e0;
+            font-size: 12px;
+            font-weight: 500;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+        .info-box ul {
+            margin-left: 20px;
+            color: #b0b0b0;
+        }
+        .info-box li {
+            margin: 10px 0;
+            font-size: 12px;
+            line-height: 1.6;
+        }
+        .features-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+            gap: 24px;
+            margin: 40px 0;
+        }
+        .feature-card {
+            background: #1a1a1a;
+            padding: 30px;
+            border-radius: 16px;
+            border: 1px solid #ffffff;
+            text-align: center;
+        }
+        .feature-icon {
+            font-size: 32px;
+            margin-bottom: 16px;
+            opacity: 0.7;
+        }
+        .feature-title {
+            font-size: 13px;
+            font-weight: 500;
+            margin-bottom: 12px;
+            color: #e0e0e0;
+            letter-spacing: 0.3px;
+        }
+        .feature-description {
+            color: #b0b0b0;
+            font-size: 11px;
+            line-height: 1.6;
+        }
+        .api-docs {
+            background: #1a1a1a;
+            color: #ffffff;
+            padding: 24px;
+            border-radius: 12px;
+            overflow-x: auto;
+            font-family: 'Monaco', 'Courier New', monospace;
+            font-size: 11px;
+            line-height: 1.8;
+            border: 1px solid #ffffff;
+        }
+        .api-endpoint {
+            color: #ffffff;
+            margin-bottom: 12px;
+        }
+        .api-method {
+            color: #6a9eff;
+        }
+        .api-param {
+            color: #9cdcfe;
+        }
+        /* Progress Bar */
+        .progress-container {
+            background: #1a1a1a;
+            padding: 24px;
+            border-radius: 12px;
+            margin: 30px 0;
+            border: 1px solid #ffffff;
+        }
+        .progress-info {
+            display: flex;
+            justify-content: space-between;
+            margin-bottom: 14px;
+            font-weight: 500;
+            color: #ffffff;
+            font-size: 11px;
+            letter-spacing: 0.3px;
+        }
+        .progress-bar {
+            width: 100%;
+            height: 24px;
+            background: #2d2d2d;
+            border-radius: 12px;
+            overflow: hidden;
+            border: 1px solid #ffffff;
+        }
+        .progress-fill {
+            height: 100%;
+            background: #ffffff;
+            width: 0%;
+            transition: width 0.3s ease;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: #000000;
+            font-weight: 500;
+            font-size: 10px;
+        }
+        /* Table */
+        .table-container {
+            overflow-x: auto;
+            max-height: 600px;
+            overflow-y: auto;
+            margin-top: 30px;
+            border-radius: 12px;
+            border: 1px solid #ffffff;
+        }
+        .results-table {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 11px;
+        }
+        .results-table thead {
+            position: sticky;
+            top: 0;
+            background: #1a1a1a;
+            color: #ffffff;
+            z-index: 10;
+        }
+        .results-table th {
+            padding: 12px 14px;
+            text-align: left;
+            font-weight: 500;
+            border-bottom: 1px solid #ffffff;
+            font-size: 10px;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+        .results-table td {
+            padding: 10px 14px;
+            border-bottom: 1px solid #2d2d2d;
+            color: #ffffff;
+        }
+        .results-table tbody tr:hover {
+            background: #2d2d2d;
+        }
+        .results-table tbody tr.completed {
+            background: #2d2d2d;
+        }
+        .results-table tbody tr.error {
+            background: #2d2d2d;
+        }
+        .email-cell {
+            color: #ffffff;
+            font-weight: 400;
+        }
+        .error-cell {
+            color: #ffffff;
+            font-weight: 400;
+        }
+        .loading-row {
+            opacity: 0.5;
+        }
+        .loading-cell {
+            text-align: center;
+            padding: 12px;
+        }
+        .row-spinner {
+            border: 2px solid #3d3d3d;
+            border-top: 2px solid #ffffff;
+            border-radius: 50%;
+            width: 16px;
+            height: 16px;
+            animation: spin 1s linear infinite;
+            display: inline-block;
+        }
+        /* Map styles */
+        .map-container {
+            width: 100%;
+            height: 500px;
+            border-radius: 16px;
+            overflow: hidden;
+            margin: 20px 0;
+            border: 1px solid #ffffff;
+            position: relative;
+        }
+        #map {
+            width: 100%;
+            height: 100%;
+        }
+        #mapInfo {
+            position: absolute;
+            top: 10px;
+            right: 10px;
+            background: rgba(26, 26, 26, 0.95);
+            padding: 8px 12px;
+            border-radius: 8px;
+            border: 1px solid #ffffff;
+            font-size: 11px;
+            color: #ffffff;
+            z-index: 1000;
+            pointer-events: none;
+        }
+        .company-types-container {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+            gap: 12px;
+            margin: 20px 0;
+            max-height: 300px;
+            overflow-y: auto;
+            padding: 12px;
+            background: #1a1a1a;
+            border-radius: 12px;
+            border: 1px solid #ffffff;
+        }
+        .company-type-checkbox {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+        .company-type-checkbox input[type="checkbox"] {
+            width: 16px;
+            height: 16px;
+            cursor: pointer;
+        }
+        .company-type-checkbox label {
+            font-size: 11px;
+            color: #b0b0b0;
+            cursor: pointer;
+            user-select: none;
+        }
+        .custom-type-input {
+            display: flex;
+            gap: 8px;
+            margin-top: 16px;
+        }
+        .custom-type-input input {
+            flex: 1;
+            padding: 8px 12px;
+            border: 1px solid #ffffff;
+            border-radius: 12px;
+            font-size: 12px;
+            background: #1a1a1a;
+            color: #ffffff;
+        }
+        .custom-type-input button {
+            padding: 8px 16px;
+            background: #ffffff;
+            color: #000000;
+            border: 1px solid #ffffff;
+            border-radius: 12px;
+            font-size: 11px;
+            cursor: pointer;
+            text-transform: uppercase;
+            letter-spacing: 0.3px;
+        }
+        .custom-type-input button:hover {
+            background: #2d2d2d;
+            color: #ffffff;
+        }
+        .selected-types {
+            margin: 16px 0;
+            padding: 12px;
+            background: #1a1a1a;
+            border-radius: 12px;
+            border: 1px solid #ffffff;
+            min-height: 40px;
+        }
+        .selected-type-tag {
+            display: inline-block;
+            padding: 4px 10px;
+            margin: 4px;
+            background: #2d2d2d;
+            border: 1px solid #ffffff;
+            border-radius: 12px;
+            font-size: 10px;
+            color: #ffffff;
+        }
+        .selected-type-tag .remove {
+            margin-left: 6px;
+            cursor: pointer;
+            color: #ffffff;
+        }
+        /* City Autocomplete */
+        .city-suggestions {
+            position: absolute;
+            top: 100%;
+            left: 0;
+            right: 0;
+            background: #1a1a1a;
+            border: 1px solid #ffffff;
+            border-radius: 12px;
+            margin-top: 4px;
+            max-height: 300px;
+            overflow-y: auto;
+            z-index: 1000;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.5);
+        }
+        .city-suggestion-item {
+            padding: 12px 16px;
+            cursor: pointer;
+            border-bottom: 1px solid #2d2d2d;
+            transition: all 0.2s;
+            font-size: 12px;
+        }
+        .city-suggestion-item:last-child {
+            border-bottom: none;
+        }
+        .city-suggestion-item:hover {
+            background: #2d2d2d;
+        }
+        .city-suggestion-item .city-name {
+            color: #ffffff;
+            font-weight: 500;
+            margin-bottom: 2px;
+        }
+        .city-suggestion-item .city-country {
+            color: #b0b0b0;
+            font-size: 11px;
+        }
+        @media (max-width: 768px) {
+            .sidebar {
+                display: none;
+            }
+            .form-grid {
+                grid-template-columns: 1fr;
+            }
+            .header-top {
+                flex-direction: column;
+                gap: 15px;
+            }
+            .tabs {
+                overflow-x: auto;
+            }
+        }
+    </style>
+</head>
+<body>
+    <!-- Header -->
+    <div class="header">
+        <div class="header-top">
+            <div class="logo">
+                <div class="logo-icon">
+                    <img src="/static/logos/logoPassivleads.png" alt="Passiv Leads Logo">
+                </div>
+                <div>
+                    Passiv Leads
+                    <span class="free-badge">FREE</span>
+                </div>
+            </div>
+            <div class="header-actions">
+                <a href="/api">API Docs</a>
+                <a href="https://github.com" target="_blank">GitHub</a>
+            </div>
+        </div>
+        <div class="tabs">
+            <div class="tab active" data-tab="web">Web Interface</div>
+            <div class="tab" data-tab="api">API</div>
+            <div class="tab" data-tab="docs">Documentation</div>
+            <div class="tab" data-tab="about">About</div>
+        </div>
+    </div>
+
+    <!-- Main Container -->
+    <div class="main-container">
+        <!-- Sidebar -->
+        <div class="sidebar">
+            <div class="sidebar-section">
+                <div class="sidebar-title">Passiv Leads</div>
+                <div class="sidebar-item active" data-tool="email-finder">
+                    <span class="sidebar-item-icon">
+                        <svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+                            <path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"></path>
+                            <polyline points="22,6 12,13 2,6"></polyline>
+                        </svg>
+                    </span>
+                    <span>Email Finder</span>
+                </div>
+                <div class="sidebar-item" data-tool="google-maps">
+                    <span class="sidebar-item-icon">
+                        <svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+                            <path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"></path>
+                            <circle cx="12" cy="10" r="3"></circle>
+                        </svg>
+                    </span>
+                    <span>OpenStreetMap Scraper</span>
+                </div>
+                <div class="sidebar-item coming-soon" data-tool="leads-finder">
+                    <span class="sidebar-item-icon">
+                        <svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+                            <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"></path>
+                            <circle cx="9" cy="7" r="4"></circle>
+                            <path d="M23 21v-2a4 4 0 0 0-3-3.87"></path>
+                            <path d="M16 3.13a4 4 0 0 1 0 7.75"></path>
+                        </svg>
+                    </span>
+                    <span>Leads Finder</span>
+                    <span class="coming-soon-badge">SOON</span>
+                </div>
+                <div class="sidebar-item coming-soon" data-tool="social-media">
+                    <span class="sidebar-item-icon">
+                        <svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+                            <rect x="2" y="2" width="20" height="20" rx="5" ry="5"></rect>
+                            <path d="M16 11.37A4 4 0 1 1 12.63 8 4 4 0 0 1 16 11.37z"></path>
+                            <line x1="17.5" y1="6.5" x2="17.51" y2="6.5"></line>
+                        </svg>
+                    </span>
+                    <span>Social Media Scraper</span>
+                    <span class="coming-soon-badge">SOON</span>
+                </div>
+                <div class="sidebar-item coming-soon" data-tool="product-scraper">
+                    <span class="sidebar-item-icon">
+                        <svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+                            <rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect>
+                            <rect x="7" y="7" width="3" height="3"></rect>
+                            <rect x="14" y="7" width="3" height="3"></rect>
+                            <rect x="7" y="14" width="3" height="3"></rect>
+                            <rect x="14" y="14" width="3" height="3"></rect>
+                        </svg>
+                    </span>
+                    <span>Product Scraper</span>
+                    <span class="coming-soon-badge">SOON</span>
+                </div>
+            </div>
+        </div>
+
+        <!-- Content Area -->
+        <div class="content">
+            <!-- Web Interface Tab -->
+            <div class="content-section active" id="web-section">
+                <!-- Email Finder Tool -->
+                <div class="tool-content" id="email-finder-content">
+                    <div class="page-header">
+                        <div style="background: #1a1a1a; padding: 40px; border-radius: 16px; border: 1px solid #ffffff; margin-bottom: 40px;">
+                            <h1 style="font-size: 24px; font-weight: 500; color: #ffffff; margin-bottom: 16px; letter-spacing: 0.3px;">Email Finder</h1>
+                            <p style="font-size: 14px; color: #ffffff; line-height: 1.7; margin: 0;">
+                                Find all email addresses from websites automatically. Upload your list of URLs and get every email found on those sites. Works on contact pages, privacy policies, and all other pages.
+                            </p>
+                        </div>
+                    </div>
+
+                    <div class="card">
+                        <h2 class="card-title">Upload CSV</h2>
+
+                        <form id="uploadForm" enctype="multipart/form-data">
+                            <div class="upload-section" id="uploadSection">
+                                <input type="file" id="csvFile" name="file" accept=".csv" required>
+                                <label for="csvFile" class="file-label">Select CSV File</label>
+                                <div class="file-name" id="fileName">No file selected</div>
+                            </div>
+
+                            <button type="submit" class="btn-primary" id="submitBtn">
+                                Find Emails
+                            </button>
+                        </form>
+
+                        <!-- Progress Bar -->
+                        <div class="progress-container" id="progressContainer" style="display: none;">
+                            <div class="progress-info">
+                                <span id="progressText">0 / 0 rows processed</span>
+                                <span id="progressPercent">0%</span>
+                            </div>
+                            <div class="progress-bar">
+                                <div class="progress-fill" id="progressFill"></div>
+                            </div>
+                        </div>
+
+                        <!-- Results Table -->
+                        <div class="card" id="resultsCard" style="display: none;">
+                            <h2 class="card-title">Real-time Results</h2>
+                            <div class="table-container">
+                                <table id="resultsTable" class="results-table">
+                                    <thead id="tableHead"></thead>
+                                    <tbody id="tableBody"></tbody>
+                                </table>
+                            </div>
+                        </div>
+
+                        <div class="alert alert-error" id="error"></div>
+                        <div class="alert alert-success" id="success" style="display: none;">
+                            <strong>Processing complete</strong>
+                            <a href="#" id="downloadLink" class="download-link" download>Download CSV with emails</a>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Google Maps Scraper Tool -->
+                <div class="tool-content" id="google-maps-content" style="display: none;">
+                    <div class="page-header">
+                        <h1 class="page-title">OpenStreetMap Scraper</h1>
+                        <p class="page-description">Scrape business data from OpenStreetMap. Select a city and company types to find all businesses in the area.</p>
+                    </div>
+
+                    <div class="card">
+                        <h2 class="card-title">Search Configuration</h2>
+                        
+                        <form id="osmForm">
+                            <div class="form-group" style="position: relative;">
+                                <label for="cityInput">City Name</label>
+                                <input type="text" id="cityInput" name="city" placeholder="e.g., Paris, London, New York" autocomplete="off" required>
+                                <div id="citySuggestions" class="city-suggestions" style="display: none;"></div>
+                            </div>
+
+                            <button type="button" id="geocodeBtn" class="btn-primary" style="margin-top: 20px; margin-bottom: 20px;">
+                                Load City Map
+                            </button>
+                        </form>
+
+                        <!-- Map Container -->
+                        <div class="map-container" id="mapContainer" style="display: none;">
+                            <div id="map"></div>
+                            <div id="mapInfo"></div>
+                        </div>
+
+                        <!-- Company Types Selection -->
+                        <div id="companyTypesSection" style="display: none;">
+                            <h2 class="card-title" style="margin-top: 30px;">Select Company Types</h2>
+                            
+                            <div class="company-types-container" id="companyTypesContainer">
+                                <!-- Types will be populated by JavaScript -->
+                            </div>
+
+                            <div class="custom-type-input">
+                                <input type="text" id="customTypeInput" placeholder="Add custom company type (e.g., restaurant, cafe, shop)">
+                                <button type="button" id="addCustomTypeBtn">Add</button>
+                            </div>
+
+                            <div class="selected-types">
+                                <strong style="font-size: 11px; color: #b0b0b0; display: block; margin-bottom: 8px;">Selected Types:</strong>
+                                <div id="selectedTypesList"></div>
+                            </div>
+
+                            <button type="button" id="startScrapingBtn" class="btn-primary" style="margin-top: 30px;">
+                                Start Scraping
+                            </button>
+                        </div>
+
+                        <!-- Progress Bar -->
+                        <div class="progress-container" id="osmProgressContainer" style="display: none;">
+                            <div class="progress-info">
+                                <span id="osmProgressText">0 companies found</span>
+                                <span id="osmProgressPercent">0%</span>
+                            </div>
+                            <div class="progress-bar">
+                                <div class="progress-fill" id="osmProgressFill"></div>
+                            </div>
+                        </div>
+
+                        <!-- Results Table -->
+                        <div class="card" id="osmResultsCard" style="display: none; margin-top: 30px;">
+                            <h2 class="card-title">Scraped Companies</h2>
+                            <div class="table-container">
+                                <table id="osmResultsTable" class="results-table">
+                                    <thead id="osmTableHead"></thead>
+                                    <tbody id="osmTableBody"></tbody>
+                                </table>
+                            </div>
+                        </div>
+
+                        <div class="alert alert-error" id="osmError"></div>
+                        <div class="alert alert-success" id="osmSuccess" style="display: none;">
+                            <strong>Scraping complete</strong>
+                            <a href="#" id="osmDownloadLink" class="download-link" download>Download CSV with companies</a>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="tool-content" id="leads-finder-content" style="display: none;">
+                    <div class="page-header">
+                        <h1 class="page-title">Leads Finder</h1>
+                        <p class="page-description">Coming soon - Find qualified leads automatically</p>
+                    </div>
+                    <div class="card">
+                        <div class="alert alert-info">
+                            <strong>Under development</strong><br>
+                            This tool will be available soon. It will allow you to automatically find qualified leads.
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- API Tab -->
+            <div class="content-section" id="api-section">
+                <div class="page-header">
+                    <h1 class="page-title">API Documentation</h1>
+                    <p class="page-description">
+                        Integrate Passiv Leads into your applications via our REST API.
+                    </p>
+                </div>
+
+                <div class="card">
+                    <h2 class="card-title">Endpoint: Find Emails</h2>
+                    <div class="api-docs">
+                        <div class="api-endpoint">
+                            <span class="api-method">POST</span> /api/find-emails
+                        </div>
+                        <div>
+                            <span class="api-param">url</span>: string (required)<br>
+                            <span class="api-param">max_pages</span>: number (optional, default: 50)<br>
+                            <span class="api-param">timeout</span>: number (optional, default: 10)
+                        </div>
+                    </div>
+                </div>
+
+                <div class="card">
+                    <h2 class="card-title">Endpoint: Process CSV</h2>
+                    <div class="api-docs">
+                        <div class="api-endpoint">
+                            <span class="api-method">POST</span> /api/process-csv
+                        </div>
+                        <div>
+                            <span class="api-param">file</span>: file (required, CSV format)<br>
+                            <span class="api-param">max_pages</span>: number (optional, default: 50)<br>
+                            <span class="api-param">timeout</span>: number (optional, default: 10)<br>
+                            <span class="api-param">url_column</span>: string (optional, default: "url")
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Documentation Tab -->
+            <div class="content-section" id="docs-section">
+                <div class="page-header">
+                    <h1 class="page-title">Documentation</h1>
+                    <p class="page-description">Complete guide to using Passiv Leads</p>
+                </div>
+
+                <div class="card">
+                    <h2 class="card-title">Getting Started</h2>
+                    <p>Passiv Leads is a free platform for scraping data from multiple sources.</p>
+                    <h3>Available features:</h3>
+                    <ul>
+                        <li><strong>Email Finder</strong>: Find all emails on a website</li>
+                        <li><strong>Google Maps Scraper</strong>: Coming soon</li>
+                        <li><strong>Leads Finder</strong>: Coming soon</li>
+                    </ul>
+                </div>
+            </div>
+
+            <!-- About Tab -->
+            <div class="content-section" id="about-section">
+                <div class="page-header">
+                    <h1 class="page-title">About Passiv Leads</h1>
+                    <p class="page-description">
+                        Passiv Leads is a free platform that allows you to scrape data from multiple sources.
+                    </p>
+                </div>
+
+                <div class="features-grid">
+                    <div class="feature-card">
+                        <div class="feature-icon">FREE</div>
+                        <div class="feature-title">100% Free</div>
+                        <div class="feature-description">
+                            No cost, no limits. Use all tools for free.
+                        </div>
+                    </div>
+                    <div class="feature-card">
+                        <div class="feature-icon">FAST</div>
+                        <div class="feature-title">Fast & Efficient</div>
+                        <div class="feature-description">
+                            Fast processing of your data with accurate results.
+                        </div>
+                    </div>
+                    <div class="feature-card">
+                        <div class="feature-icon">API</div>
+                        <div class="feature-title">REST API</div>
+                        <div class="feature-description">
+                            Easily integrate into your applications via our API.
+                        </div>
+                    </div>
+                    <div class="feature-card">
+                        <div class="feature-icon">MULTI</div>
+                        <div class="feature-title">Multiple Sources</div>
+                        <div class="feature-description">
+                            Scrape from multiple sources: websites, Google Maps, and more.
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // Tab switching
+        document.querySelectorAll('.tab').forEach(tab => {
+            tab.addEventListener('click', () => {
+                const tabName = tab.dataset.tab;
+                
+                // Update tabs
+                document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+                tab.classList.add('active');
+                
+                // Update sections
+                document.querySelectorAll('.content-section').forEach(s => s.classList.remove('active'));
+                document.getElementById(`${tabName}-section`).classList.add('active');
+            });
+        });
+
+        // Global function to update file name display
+        function updateFileNameDisplay() {
+            const fileInput = window.csvFileInput || document.getElementById('csvFile');
+            const fileName = document.getElementById('fileName');
+            
+            if (!fileInput || !fileName) return;
+            
+            // Use requestAnimationFrame to ensure DOM is updated
+            requestAnimationFrame(() => {
+                if (fileInput.files && fileInput.files.length > 0) {
+                    const fileNameText = fileInput.files[0].name;
+                    fileName.textContent = fileNameText;
+                    fileName.style.color = '#ffffff';
+                    fileName.style.fontWeight = '500';
+                } else {
+                    fileName.textContent = 'No file selected';
+                    fileName.style.color = '#b0b0b0';
+                    fileName.style.fontWeight = '400';
+                }
+            });
+        }
+        
+        // Function to setup file input listeners
+        function setupFileInputListeners() {
+            const fileInput = document.getElementById('csvFile');
+            const fileName = document.getElementById('fileName');
+            
+            if (!fileInput || !fileName) return;
+            
+            // Store reference globally
+            window.csvFileInput = fileInput;
+            
+            // Remove all existing event listeners by cloning
+            const newFileInput = fileInput.cloneNode(true);
+            fileInput.parentNode.replaceChild(newFileInput, fileInput);
+            window.csvFileInput = newFileInput;
+            
+            // Attach event listeners with immediate and delayed checks
+            newFileInput.addEventListener('change', function(e) {
+                updateFileNameDisplay();
+            });
+            
+            newFileInput.addEventListener('input', function(e) {
+                updateFileNameDisplay();
+            });
+            
+            // Also add a focus listener to check when dialog closes
+            newFileInput.addEventListener('focus', function() {
+                setTimeout(updateFileNameDisplay, 300);
+            });
+        }
+        
+        // Sidebar tool switching
+        document.querySelectorAll('.sidebar-item').forEach(item => {
+            item.addEventListener('click', () => {
+                if (item.classList.contains('coming-soon')) return;
+                
+                const toolName = item.dataset.tool;
+                
+                // Update sidebar
+                document.querySelectorAll('.sidebar-item').forEach(i => i.classList.remove('active'));
+                item.classList.add('active');
+                
+                // Update tool content
+                document.querySelectorAll('.tool-content').forEach(c => c.style.display = 'none');
+                document.getElementById(`${toolName}-content`).style.display = 'block';
+                
+                // Re-setup file input listeners if Email Finder is active
+                if (toolName === 'email-finder') {
+                    setTimeout(setupFileInputListeners, 100);
+                }
+            });
+        });
+
+        // File upload handling with SSE streaming
+        // Initialize file input on page load
+        setupFileInputListeners();
+        
+        const fileInput = document.getElementById('csvFile');
+        const fileName = document.getElementById('fileName');
+        const uploadSection = document.getElementById('uploadSection');
+        const form = document.getElementById('uploadForm');
+        const error = document.getElementById('error');
+        const success = document.getElementById('success');
+        const submitBtn = document.getElementById('submitBtn');
+        const downloadLink = document.getElementById('downloadLink');
+        const progressContainer = document.getElementById('progressContainer');
+        const progressText = document.getElementById('progressText');
+        const progressPercent = document.getElementById('progressPercent');
+        const progressFill = document.getElementById('progressFill');
+        const resultsCard = document.getElementById('resultsCard');
+        const tableHead = document.getElementById('tableHead');
+        const tableBody = document.getElementById('tableBody');
+        
+        let tableColumns = [];
+        let totalRows = 0;
+        let processedRows = 0;
+        let csvData = '';
+        let processedRowsSet = new Set(); // Pour éviter les doublons
+        
+        // Polling check as ultimate backup (checks every 500ms when file input is visible)
+        setInterval(() => {
+            const currentFileInput = window.csvFileInput || document.getElementById('csvFile');
+            const emailFinderContent = document.getElementById('email-finder-content');
+            
+            // Only check if Email Finder is visible
+            if (currentFileInput && emailFinderContent && emailFinderContent.style.display !== 'none') {
+                updateFileNameDisplay();
+            }
+        }, 500);
+        
+        uploadSection.addEventListener('dragover', (e) => {
+            e.preventDefault();
+            uploadSection.classList.add('dragover');
+        });
+        
+        uploadSection.addEventListener('dragleave', () => {
+            uploadSection.classList.remove('dragover');
+        });
+        
+        uploadSection.addEventListener('drop', (e) => {
+            e.preventDefault();
+            uploadSection.classList.remove('dragover');
+            if (e.dataTransfer.files.length > 0) {
+                const currentFileInput = window.csvFileInput || document.getElementById('csvFile');
+                
+                // Create a new FileList-like object using DataTransfer
+                const dataTransfer = new DataTransfer();
+                for (let i = 0; i < e.dataTransfer.files.length; i++) {
+                    dataTransfer.items.add(e.dataTransfer.files[i]);
+                }
+                
+                if (currentFileInput) {
+                    currentFileInput.files = dataTransfer.files;
+                    
+                    // Update file name display
+                    if (fileName) {
+                        fileName.textContent = e.dataTransfer.files[0].name;
+                        fileName.style.color = '#ffffff';
+                        fileName.style.fontWeight = '500';
+                    }
+                    
+                    // Trigger change event manually
+                    const changeEvent = new Event('change', { bubbles: true });
+                    currentFileInput.dispatchEvent(changeEvent);
+                }
+            }
+        });
+        
+        form.addEventListener('submit', async (e) => {
+            e.preventDefault();
+            
+            // Get the current file input (might be the cloned one)
+            const currentFileInput = window.csvFileInput || document.getElementById('csvFile');
+            
+            // Check if file is selected
+            if (!currentFileInput || !currentFileInput.files || currentFileInput.files.length === 0) {
+                error.textContent = 'Error: Please select a CSV file first';
+                error.classList.add('active');
+                return;
+            }
+            
+            const formData = new FormData(form);
+            
+            // Make sure the file is in the FormData
+            if (currentFileInput.files[0]) {
+                formData.set('file', currentFileInput.files[0]);
+            }
+            
+            // Reset UI
+            error.classList.remove('active');
+            success.style.display = 'none';
+            submitBtn.disabled = true;
+            tableBody.innerHTML = '';
+            tableHead.innerHTML = '';
+            processedRows = 0;
+            totalRows = 0;
+            csvData = '';
+            processedRowsSet.clear();
+            
+            // Show progress and results
+            progressContainer.style.display = 'block';
+            resultsCard.style.display = 'block';
+            
+            // Initialize progress bar
+            updateProgress(0, 0);
+            
+            try {
+                const response = await fetch('/api/process-csv-stream', {
+                    method: 'POST',
+                    body: formData
+                });
+                
+                if (!response.ok) {
+                    throw new Error(`Erreur HTTP: ${response.status}`);
+                }
+                
+                const reader = response.body.getReader();
+                const decoder = new TextDecoder();
+                
+                let buffer = '';
+                
+                while (true) {
+                    const { done, value } = await reader.read();
+                    
+                    if (done) break;
+                    
+                    buffer += decoder.decode(value, { stream: true });
+                    const lines = buffer.split('\n');
+                    buffer = lines.pop() || ''; // Keep incomplete line in buffer
+                    
+                    for (const line of lines) {
+                        if (line.startsWith('data: ')) {
+                            try {
+                                const data = JSON.parse(line.slice(6));
+                                
+                                if (data.type === 'error') {
+                                    throw new Error(data.error || 'Erreur inconnue');
+                                } else if (data.type === 'init') {
+                                    totalRows = data.total_rows;
+                                    tableColumns = data.columns;
+                                    const rowsData = data.rows_data || [];
+                                    
+                                    // Create table header
+                                    const headerRow = document.createElement('tr');
+                                    tableColumns.forEach(col => {
+                                        const th = document.createElement('th');
+                                        th.textContent = col;
+                                        headerRow.appendChild(th);
+                                    });
+                                    const emailTh = document.createElement('th');
+                                    emailTh.textContent = 'Email';
+                                    headerRow.appendChild(emailTh);
+                                    tableHead.appendChild(headerRow);
+                                    
+                                    // Pré-créer toutes les lignes avec les données CSV et indicateur de chargement
+                                    for (let i = 0; i < totalRows; i++) {
+                                        const row = document.createElement('tr');
+                                        const rowNum = i + 1;
+                                        row.setAttribute('data-row', rowNum);
+                                        row.classList.add('loading-row');
+                                        
+                                        // Ajouter les données CSV originales
+                                        const rowData = rowsData[i] || {};
+                                        tableColumns.forEach(col => {
+                                            const td = document.createElement('td');
+                                            td.textContent = rowData[col] || '';
+                                            row.appendChild(td);
+                                        });
+                                        
+                                        // Colonne email avec loader
+                                        const emailTd = document.createElement('td');
+                                        emailTd.className = 'loading-cell';
+                                        emailTd.innerHTML = '<div class="row-spinner"></div>';
+                                        row.appendChild(emailTd);
+                                        
+                                        tableBody.appendChild(row);
+                                    }
+                                    
+                                    updateProgress(0, totalRows);
+                                } else if (data.type === 'update') {
+                                    const rowNum = data.row;
+                                    const rowData = data.data;
+                                    
+                                    // S'assurer qu'on ne compte qu'une seule fois chaque ligne traitée
+                                    if (!processedRowsSet.has(rowNum)) {
+                                        processedRowsSet.add(rowNum);
+                                        processedRows = processedRowsSet.size;
+                                    }
+                                    
+                                    // Trouver la ligne
+                                    const row = tableBody.querySelector(`tr[data-row="${rowNum}"]`);
+                                    if (!row) return;
+                                    
+                                    // Retirer la classe loading
+                                    row.classList.remove('loading-row');
+                                    
+                                    // Préserver les données CSV existantes et mettre à jour seulement la colonne email
+                                    const existingCells = row.querySelectorAll('td');
+                                    
+                                    // Si les cellules existent déjà (chargées depuis init), on met juste à jour l'email
+                                    if (existingCells.length > 0) {
+                                        // Mettre à jour la dernière cellule (email) seulement
+                                        const emailTd = existingCells[existingCells.length - 1];
+                                        emailTd.className = '';
+                                        emailTd.innerHTML = '';
+                                        
+                                        if (data.status === 'completed') {
+                                            emailTd.className = 'email-cell';
+                                            // Afficher les emails avec des sauts de ligne
+                                            const emails = (rowData.email || '').split('\n').filter(e => e.trim());
+                                            if (emails.length > 0) {
+                                                emails.forEach((email, i) => {
+                                                    if (i > 0) emailTd.appendChild(document.createElement('br'));
+                                                    emailTd.appendChild(document.createTextNode(email));
+                                                });
+                                            } else {
+                                                emailTd.textContent = '';
+                                            }
+                                            row.classList.add('completed');
+                                        } else if (data.status === 'error') {
+                                            emailTd.className = 'error-cell';
+                                            emailTd.textContent = rowData.email || 'Erreur';
+                                            row.classList.add('error');
+                                        } else {
+                                            emailTd.textContent = rowData.email || '';
+                                        }
+                                    } else {
+                                        // Fallback si les cellules n'existent pas encore
+                                        row.innerHTML = '';
+                                        tableColumns.forEach(col => {
+                                            const td = document.createElement('td');
+                                            td.textContent = rowData[col] || '';
+                                            row.appendChild(td);
+                                        });
+                                        
+                                        const emailTd = document.createElement('td');
+                                        if (data.status === 'completed') {
+                                            emailTd.className = 'email-cell';
+                                            const emails = (rowData.email || '').split('\n').filter(e => e.trim());
+                                            if (emails.length > 0) {
+                                                emails.forEach((email, i) => {
+                                                    if (i > 0) emailTd.appendChild(document.createElement('br'));
+                                                    emailTd.appendChild(document.createTextNode(email));
+                                                });
+                                            } else {
+                                                emailTd.textContent = '';
+                                            }
+                                            row.classList.add('completed');
+                                        } else if (data.status === 'error') {
+                                            emailTd.className = 'error-cell';
+                                            emailTd.textContent = rowData.email || 'Erreur';
+                                            row.classList.add('error');
+                                        } else {
+                                            emailTd.textContent = rowData.email || '';
+                                        }
+                                        row.appendChild(emailTd);
+                                    }
+                                    
+                                    // Mettre à jour la progression uniquement si une nouvelle ligne est traitée
+                                    updateProgress(processedRows, totalRows);
+                                    
+                                    // Scroll to bottom
+                                    tableBody.parentElement.scrollTop = tableBody.parentElement.scrollHeight;
+                                } else if (data.type === 'complete') {
+                                    csvData = data.csv;
+                                    updateProgress(totalRows, totalRows);
+                                    
+                                    // Create download link
+                                    const blob = new Blob([csvData], { type: 'text/csv;charset=utf-8;' });
+                                    const url = window.URL.createObjectURL(blob);
+                                    const timestamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, -5);
+                                    const originalName = fileInput.files[0].name.replace('.csv', '');
+                                    const downloadFileName = `${originalName}_with_emails_${timestamp}.csv`;
+                                    
+                                    downloadLink.href = url;
+                                    downloadLink.download = downloadFileName;
+                                    
+                                    success.style.display = 'block';
+                                    submitBtn.disabled = false;
+                                }
+                            } catch (parseError) {
+                                console.error('Error parsing SSE data:', parseError);
+                            }
+                        }
+                    }
+                }
+                
+            } catch (err) {
+                error.textContent = 'Error: ' + err.message;
+                error.classList.add('active');
+                submitBtn.disabled = false;
+                progressContainer.style.display = 'none';
+            }
+        });
+        
+        function updateProgress(current, total) {
+            if (total === 0) {
+                progressText.textContent = '0 / 0 rows processed';
+                progressPercent.textContent = '0%';
+                progressFill.style.width = '0%';
+                progressFill.textContent = '';
+                return;
+            }
+            
+            const percent = Math.min(Math.round((current / total) * 100), 100);
+            progressText.textContent = `${current} / ${total} rows processed`;
+            progressPercent.textContent = `${percent}%`;
+            progressFill.style.width = `${percent}%`;
+            progressFill.textContent = percent >= 5 ? `${percent}%` : '';
+        }
+
+        // OpenStreetMap Scraper JavaScript
+        let map = null;
+        let mapBounds = null;
+        let selectedCompanyTypes = new Set();
+        let allCompanies = [];
+        let osmCsvData = '';
+
+        // Predefined company types from OpenStreetMap
+        const companyTypes = [
+            'restaurant', 'cafe', 'bar', 'hotel', 'bank', 'pharmacy', 'hospital',
+            'school', 'university', 'library', 'cinema', 'theatre', 'fuel',
+            'parking', 'post_office', 'police', 'fire_station', 'townhall',
+            'supermarket', 'bakery', 'butcher', 'clothes', 'shoes', 'electronics',
+            'furniture', 'bookshop', 'jewelry', 'hairdresser', 'florist', 'car',
+            'bicycle', 'hardware', 'lawyer', 'accountant', 'insurance', 'estate_agent',
+            'architect', 'consulting', 'it', 'advertising', 'carpenter', 'electrician',
+            'plumber', 'photographer', 'tailor'
+        ];
+
+        // Initialize company types checkboxes
+        function initializeCompanyTypes() {
+            const container = document.getElementById('companyTypesContainer');
+            container.innerHTML = '';
+            
+            companyTypes.forEach(type => {
+                const div = document.createElement('div');
+                div.className = 'company-type-checkbox';
+                div.innerHTML = `
+                    <input type="checkbox" id="type_${type}" value="${type}">
+                    <label for="type_${type}">${type}</label>
+                `;
+                container.appendChild(div);
+                
+                const checkbox = div.querySelector('input');
+                checkbox.addEventListener('change', (e) => {
+                    if (e.target.checked) {
+                        selectedCompanyTypes.add(type);
+                    } else {
+                        selectedCompanyTypes.delete(type);
+                    }
+                    updateSelectedTypesList();
+                });
+            });
+        }
+
+        function updateSelectedTypesList() {
+            const list = document.getElementById('selectedTypesList');
+            list.innerHTML = '';
+            
+            selectedCompanyTypes.forEach(type => {
+                const tag = document.createElement('span');
+                tag.className = 'selected-type-tag';
+                tag.innerHTML = `${type} <span class="remove" onclick="removeType('${type}')">×</span>`;
+                list.appendChild(tag);
+            });
+        }
+
+        function removeType(type) {
+            selectedCompanyTypes.delete(type);
+            const checkbox = document.getElementById(`type_${type}`);
+            if (checkbox) checkbox.checked = false;
+            updateSelectedTypesList();
+        }
+
+        // City autocomplete
+        const cityInput = document.getElementById('cityInput');
+        const citySuggestions = document.getElementById('citySuggestions');
+        let autocompleteTimeout = null;
+        let selectedCity = null;
+
+        cityInput.addEventListener('input', (e) => {
+            const query = e.target.value.trim();
+            
+            // Clear previous timeout
+            if (autocompleteTimeout) {
+                clearTimeout(autocompleteTimeout);
+            }
+            
+            // Hide suggestions if query is too short
+            if (query.length < 2) {
+                citySuggestions.style.display = 'none';
+                return;
+            }
+            
+            // Debounce the autocomplete request
+            autocompleteTimeout = setTimeout(async () => {
+                try {
+                    const response = await fetch(`/api/autocomplete-city?query=${encodeURIComponent(query)}&limit=5`);
+                    const data = await response.json();
+                    
+                    if (data.suggestions && data.suggestions.length > 0) {
+                        citySuggestions.innerHTML = '';
+                        data.suggestions.forEach(suggestion => {
+                            const item = document.createElement('div');
+                            item.className = 'city-suggestion-item';
+                            item.innerHTML = `
+                                <div class="city-name">${suggestion.name}</div>
+                                <div class="city-country">${suggestion.country || ''}</div>
+                            `;
+                            item.addEventListener('click', () => {
+                                cityInput.value = suggestion.name;
+                                selectedCity = suggestion;
+                                citySuggestions.style.display = 'none';
+                                // Auto-load the map when a suggestion is selected
+                                if (geocodeBtn) {
+                                    geocodeBtn.click();
+                                }
+                            });
+                            citySuggestions.appendChild(item);
+                        });
+                        citySuggestions.style.display = 'block';
+                    } else {
+                        citySuggestions.style.display = 'none';
+                    }
+                } catch (err) {
+                    console.error('Autocomplete error:', err);
+                    citySuggestions.style.display = 'none';
+                }
+            }, 300);
+        });
+
+        // Hide suggestions when clicking outside
+        document.addEventListener('click', (e) => {
+            if (!cityInput.contains(e.target) && !citySuggestions.contains(e.target)) {
+                citySuggestions.style.display = 'none';
+            }
+        });
+
+        // Geocode city and show map
+        const geocodeBtn = document.getElementById('geocodeBtn');
+        geocodeBtn.addEventListener('click', async () => {
+            const city = cityInput.value.trim();
+            
+            if (!city) {
+                alert('Please enter a city name');
+                return;
+            }
+
+            geocodeBtn.disabled = true;
+            geocodeBtn.textContent = 'Loading...';
+            citySuggestions.style.display = 'none';
+
+            try {
+                const response = await fetch('/api/geocode-city', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ city })
+                });
+
+                const data = await response.json();
+
+                if (!response.ok) {
+                    throw new Error(data.message || 'Could not geocode city');
+                }
+
+                // Show map container
+                document.getElementById('mapContainer').style.display = 'block';
+                document.getElementById('companyTypesSection').style.display = 'block';
+
+                // Scroll to map
+                document.getElementById('mapContainer').scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+
+                // Initialize map
+                if (map) {
+                    map.remove();
+                }
+
+                const center = data.center;
+                map = L.map('map').setView([center.lat, center.lon], 10);
+
+                // Add tile layer
+                L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+                    attribution: '© OpenStreetMap contributors'
+                }).addTo(map);
+
+                // Display city name on map
+                const mapInfo = document.getElementById('mapInfo');
+                if (mapInfo) {
+                    if (data.display_name) {
+                        mapInfo.textContent = data.display_name;
+                        mapInfo.style.display = 'block';
+                    } else {
+                        mapInfo.style.display = 'none';
+                    }
+                }
+
+                // Add city boundary polygon if available (GeoJSON)
+                let cityBoundary = null;
+                if (data.geojson) {
+                    try {
+                        cityBoundary = L.geoJSON(data.geojson, {
+                            style: {
+                                color: '#ffffff',
+                                weight: 4,
+                                fillColor: '#ffffff',
+                                fillOpacity: 0.15,
+                                opacity: 0.8
+                            }
+                        }).addTo(map);
+                        
+                        // Fit map to the polygon bounds with padding
+                        map.fitBounds(cityBoundary.getBounds(), { padding: [20, 20] });
+                    } catch (geojsonErr) {
+                        console.warn('Could not render GeoJSON, using bbox instead:', geojsonErr);
+                        // Fallback to bounding box
+                        const bbox = data.bbox;
+                        mapBounds = [[bbox.min_lat, bbox.min_lon], [bbox.max_lat, bbox.max_lon]];
+                        cityBoundary = L.rectangle(mapBounds, {
+                            color: '#ffffff',
+                            weight: 4,
+                            fillOpacity: 0.15,
+                            opacity: 0.8
+                        }).addTo(map);
+                        map.fitBounds(mapBounds, { padding: [20, 20] });
+                    }
+                } else {
+                    // Use bounding box if no GeoJSON available
+                    const bbox = data.bbox;
+                    mapBounds = [[bbox.min_lat, bbox.min_lon], [bbox.max_lat, bbox.max_lon]];
+                    cityBoundary = L.rectangle(mapBounds, {
+                        color: '#ffffff',
+                        weight: 4,
+                        fillOpacity: 0.15,
+                        opacity: 0.8
+                    }).addTo(map);
+                    map.fitBounds(mapBounds, { padding: [20, 20] });
+                }
+                
+                // Store bounds for scraping
+                if (cityBoundary) {
+                    const bounds = cityBoundary.getBounds();
+                    mapBounds = [[bounds.getSouth(), bounds.getWest()], [bounds.getNorth(), bounds.getEast()]];
+                } else {
+                    const bbox = data.bbox;
+                    mapBounds = [[bbox.min_lat, bbox.min_lon], [bbox.max_lat, bbox.max_lon]];
+                }
+
+                // Initialize company types
+                initializeCompanyTypes();
+
+            } catch (err) {
+                alert('Error: ' + err.message);
+            } finally {
+                geocodeBtn.disabled = false;
+                geocodeBtn.textContent = 'Load City Map';
+            }
+        });
+
+        // Add custom type
+        document.getElementById('addCustomTypeBtn').addEventListener('click', () => {
+            const input = document.getElementById('customTypeInput');
+            const type = input.value.trim().toLowerCase();
+            
+            if (type && !selectedCompanyTypes.has(type)) {
+                selectedCompanyTypes.add(type);
+                updateSelectedTypesList();
+                input.value = '';
+            }
+        });
+
+        // Start scraping
+        document.getElementById('startScrapingBtn').addEventListener('click', async () => {
+            const cityInput = document.getElementById('cityInput');
+            const city = cityInput.value.trim();
+
+            if (!city) {
+                alert('Please enter a city name');
+                return;
+            }
+
+            if (selectedCompanyTypes.size === 0) {
+                alert('Please select at least one company type');
+                return;
+            }
+
+            // Reset UI
+            document.getElementById('osmError').classList.remove('active');
+            document.getElementById('osmSuccess').style.display = 'none';
+            document.getElementById('osmProgressContainer').style.display = 'block';
+            document.getElementById('osmResultsCard').style.display = 'block';
+            document.getElementById('osmTableBody').innerHTML = '';
+            document.getElementById('osmTableHead').innerHTML = '';
+            allCompanies = [];
+            osmCsvData = '';
+
+            const startBtn = document.getElementById('startScrapingBtn');
+            startBtn.disabled = true;
+
+            try {
+                const response = await fetch('/api/scrape-osm-stream', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        city: city,
+                        company_types: Array.from(selectedCompanyTypes),
+                        bbox: mapBounds ? [mapBounds[0][0], mapBounds[0][1], mapBounds[1][0], mapBounds[1][1]] : null
+                    })
+                });
+
+                if (!response.ok) {
+                    throw new Error(`HTTP error: ${response.status}`);
+                }
+
+                const reader = response.body.getReader();
+                const decoder = new TextDecoder();
+                let buffer = '';
+
+                let tableInitialized = false;
+                let totalCompanies = 0;
+
+                while (true) {
+                    const { done, value } = await reader.read();
+                    if (done) break;
+
+                    buffer += decoder.decode(value, { stream: true });
+                    const lines = buffer.split('\n');
+                    buffer = lines.pop() || '';
+
+                    for (const line of lines) {
+                        if (line.startsWith('data: ')) {
+                            try {
+                                const data = JSON.parse(line.slice(6));
+
+                                if (data.type === 'error') {
+                                    throw new Error(data.error || 'Unknown error');
+                                } else if (data.type === 'init') {
+                                    totalCompanies = 0;
+                                    updateOsmProgress(0, 0);
+                                } else if (data.type === 'update') {
+                                    const companies = data.companies || [];
+                                    allCompanies.push(...companies);
+                                    totalCompanies = data.total || allCompanies.length;
+
+                                    if (!tableInitialized && companies.length > 0) {
+                                        initializeOsmTable(companies[0]);
+                                        tableInitialized = true;
+                                    }
+
+                                    companies.forEach(company => {
+                                        addCompanyToTable(company);
+                                    });
+
+                                    updateOsmProgress(allCompanies.length, totalCompanies);
+                                } else if (data.type === 'complete') {
+                                    osmCsvData = data.csv;
+                                    totalCompanies = data.total_companies || allCompanies.length;
+                                    updateOsmProgress(totalCompanies, totalCompanies);
+                                    
+                                    // Create download link
+                                    const blob = new Blob([osmCsvData], { type: 'text/csv;charset=utf-8;' });
+                                    const url = window.URL.createObjectURL(blob);
+                                    const timestamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, -5);
+                                    const downloadFileName = `osm_companies_${city}_${timestamp}.csv`;
+
+                                    document.getElementById('osmDownloadLink').href = url;
+                                    document.getElementById('osmDownloadLink').download = downloadFileName;
+                                    document.getElementById('osmSuccess').style.display = 'block';
+                                }
+                            } catch (parseError) {
+                                console.error('Error parsing SSE data:', parseError);
+                            }
+                        }
+                    }
+                }
+
+            } catch (err) {
+                document.getElementById('osmError').textContent = 'Error: ' + err.message;
+                document.getElementById('osmError').classList.add('active');
+            } finally {
+                startBtn.disabled = false;
+            }
+        });
+
+        function initializeOsmTable(firstCompany) {
+            const tableHead = document.getElementById('osmTableHead');
+            const headerRow = document.createElement('tr');
+            
+            Object.keys(firstCompany).forEach(key => {
+                const th = document.createElement('th');
+                th.textContent = key.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase());
+                headerRow.appendChild(th);
+            });
+            
+            tableHead.appendChild(headerRow);
+        }
+
+        function addCompanyToTable(company) {
+            const tableBody = document.getElementById('osmTableBody');
+            const row = document.createElement('tr');
+            
+            Object.values(company).forEach(value => {
+                const td = document.createElement('td');
+                td.textContent = value || '';
+                row.appendChild(td);
+            });
+            
+            tableBody.appendChild(row);
+        }
+
+        function updateOsmProgress(current, total) {
+            const progressText = document.getElementById('osmProgressText');
+            const progressPercent = document.getElementById('osmProgressPercent');
+            const progressFill = document.getElementById('osmProgressFill');
+
+            if (total === 0) {
+                progressText.textContent = '0 companies found';
+                progressPercent.textContent = '0%';
+                progressFill.style.width = '0%';
+                progressFill.textContent = '';
+                return;
+            }
+
+            const percent = Math.min(Math.round((current / total) * 100), 100);
+            progressText.textContent = `${current} companies found`;
+            progressPercent.textContent = `${percent}%`;
+            progressFill.style.width = `${percent}%`;
+            progressFill.textContent = percent >= 5 ? `${percent}%` : '';
+        }
+
+        // Make removeType available globally
+        window.removeType = removeType;
+    </script>
+</body>
+</html>
+

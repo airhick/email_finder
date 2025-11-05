@@ -4,13 +4,21 @@ API Flask pour Email Finder Bot
 Déployable sur Render
 """
 
-from flask import Flask, request, jsonify, send_file, render_template_string
+from flask import Flask, request, jsonify, send_file, render_template_string, Response, stream_with_context
 from flask_cors import CORS
 import logging
 import csv
 import io
+import json
+import time
+import re
+import requests
 from urllib.parse import urlparse
+from typing import List, Dict, Optional
+from concurrent.futures import ThreadPoolExecutor, as_completed
+import threading
 from email_finder import EmailFinder
+from osm_scraper import OSMScraper
 
 # Configuration du logging
 logging.basicConfig(
@@ -40,7 +48,7 @@ def find_emails():
     
     GET params ou POST body:
     - url: URL du site à scraper (requis)
-    - max_pages: Nombre maximum de pages à visiter (optionnel, défaut: 50)
+    - max_pages: Nombre maximum de pages à visiter (optionnel, défaut: 10)
     - timeout: Timeout pour les requêtes HTTP en secondes (optionnel, défaut: 10)
     
     Returns:
@@ -51,11 +59,11 @@ def find_emails():
         if request.method == 'POST':
             data = request.get_json() or {}
             url = data.get('url') or request.args.get('url')
-            max_pages = data.get('max_pages') or request.args.get('max_pages', 50, type=int)
+            max_pages = data.get('max_pages') or request.args.get('max_pages', 10, type=int)
             timeout = data.get('timeout') or request.args.get('timeout', 10, type=int)
         else:
             url = request.args.get('url')
-            max_pages = request.args.get('max_pages', 50, type=int)
+            max_pages = request.args.get('max_pages', 10, type=int)
             timeout = request.args.get('timeout', 10, type=int)
         
         # Valider l'URL
@@ -137,7 +145,7 @@ def find_emails_from_path(url):
             url = 'https://' + url
         
         # Récupérer les autres paramètres
-        max_pages = request.args.get('max_pages', 50, type=int)
+        max_pages = request.args.get('max_pages', 10, type=int)
         timeout = request.args.get('timeout', 10, type=int)
         
         # Valider l'URL
@@ -197,7 +205,174 @@ def find_emails_from_path(url):
             'details': str(e) if app.debug else None
         }), 500
 
-# Route pour traiter un CSV
+# Fonction pour détecter automatiquement la colonne URL
+def detect_url_column(fieldnames: List[str], sample_rows: List[Dict]) -> Optional[str]:
+    """
+    Détecte automatiquement la colonne contenant le plus d'URLs
+    en analysant les 5 premières lignes du CSV
+    """
+    url_pattern = re.compile(
+        r'https?://[^\s]+|www\.[^\s]+|[a-zA-Z0-9-]+\.[a-zA-Z]{2,}'
+    )
+    
+    column_url_counts = {}
+    
+    for col in fieldnames:
+        column_url_counts[col] = 0
+        for row in sample_rows[:5]:  # Analyser les 5 premières lignes
+            value = str(row.get(col, '')).strip()
+            if value and url_pattern.search(value):
+                # Vérifier si ça ressemble vraiment à une URL
+                if 'http://' in value or 'https://' in value or '.' in value and len(value.split('.')) >= 2:
+                    column_url_counts[col] += 1
+    
+    # Retourner la colonne avec le plus d'URLs
+    if column_url_counts:
+        best_column = max(column_url_counts.items(), key=lambda x: x[1])
+        if best_column[1] > 0:
+            logger.info(f"Colonne URL détectée automatiquement: '{best_column[0]}' ({best_column[1]} URLs trouvées)")
+            return best_column[0]
+    
+    return None
+
+# Route pour traiter un CSV avec streaming
+@app.route('/api/process-csv-stream', methods=['POST'])
+def process_csv_stream():
+    """
+    Endpoint pour traiter un fichier CSV avec streaming des résultats en temps réel
+    Utilise Server-Sent Events (SSE) pour les mises à jour live
+    """
+    def generate():
+        try:
+            # Vérifier qu'un fichier a été uploadé
+            if 'file' not in request.files:
+                yield f"data: {json.dumps({'error': 'Fichier manquant', 'type': 'error'})}\n\n"
+                return
+            
+            file = request.files['file']
+            
+            if file.filename == '' or not file.filename.lower().endswith('.csv'):
+                yield f"data: {json.dumps({'error': 'Fichier CSV invalide', 'type': 'error'})}\n\n"
+                return
+            
+            # Lire le CSV
+            stream = io.StringIO(file.stream.read().decode('utf-8-sig'))
+            csv_reader = csv.DictReader(stream)
+            fieldnames = csv_reader.fieldnames
+            
+            if not fieldnames:
+                yield f"data: {json.dumps({'error': 'CSV invalide', 'type': 'error'})}\n\n"
+                return
+            
+            # Lire toutes les lignes
+            rows = list(csv_reader)
+            
+            if not rows:
+                yield f"data: {json.dumps({'error': 'CSV vide', 'type': 'error'})}\n\n"
+                return
+            
+            # Détecter automatiquement la colonne URL
+            url_col = detect_url_column(fieldnames, rows)
+            
+            if not url_col:
+                yield f"data: {json.dumps({'error': 'Aucune colonne URL détectée', 'type': 'error'})}\n\n"
+                return
+            
+            # Envoyer les métadonnées initiales avec les données des lignes
+            yield f"data: {json.dumps({'type': 'init', 'total_rows': len(rows), 'url_column': url_col, 'columns': fieldnames, 'rows_data': rows})}\n\n"
+            
+            # Préparer les résultats (thread-safe)
+            results = [None] * len(rows)
+            results_lock = threading.Lock()
+            processed_count = 0
+            
+            def process_row(idx: int, row: Dict, url_col: str):
+                """Fonction pour traiter une ligne de manière thread-safe"""
+                nonlocal processed_count
+                row_copy = row.copy()
+                url = row_copy.get(url_col, '').strip()
+                
+                if not url:
+                    row_copy['email'] = ''
+                    with results_lock:
+                        results[idx - 1] = row_copy
+                        processed_count += 1
+                    return {'row': idx, 'data': row_copy, 'status': 'skipped'}
+                
+                # Ajouter le schéma si manquant
+                if not url.startswith('http://') and not url.startswith('https://'):
+                    url = 'https://' + url
+                
+                try:
+                    # Scraper l'URL
+                    finder = EmailFinder(url, max_pages=10, timeout=10)
+                    found_emails = finder.find_emails()
+                    
+                    # Joindre les emails avec des sauts de ligne
+                    email_str = '\n'.join(found_emails) if found_emails else ''
+                    row_copy['email'] = email_str
+                    
+                    with results_lock:
+                        results[idx - 1] = row_copy
+                        processed_count += 1
+                    
+                    return {'row': idx, 'data': row_copy, 'status': 'completed', 'emails_count': len(found_emails)}
+                    
+                except Exception as e:
+                    logger.error(f"Erreur lors du scraping de {url}: {e}")
+                    row_copy['email'] = f'ERROR: {str(e)}'
+                    with results_lock:
+                        results[idx - 1] = row_copy
+                        processed_count += 1
+                    return {'row': idx, 'data': row_copy, 'status': 'error', 'error': str(e)}
+            
+            # Traiter toutes les URLs en parallèle (batch de 100)
+            max_workers = 100
+            with ThreadPoolExecutor(max_workers=max_workers) as executor:
+                # Soumettre toutes les tâches
+                future_to_row = {}
+                for idx, row in enumerate(rows, 1):
+                    future = executor.submit(process_row, idx, row, url_col)
+                    future_to_row[future] = idx
+                
+                # Traiter les résultats au fur et à mesure
+                for future in as_completed(future_to_row):
+                    try:
+                        result = future.result()
+                        yield f"data: {json.dumps({'type': 'update', 'row': result['row'], 'total': len(rows), 'data': result['data'], 'status': result['status'], 'emails_count': result.get('emails_count', 0), 'error': result.get('error')})}\n\n"
+                    except Exception as e:
+                        logger.error(f"Erreur dans le traitement: {e}")
+                        row_idx = future_to_row[future]
+                        row_copy = rows[row_idx - 1].copy()
+                        row_copy['email'] = f'ERROR: {str(e)}'
+                        results[row_idx - 1] = row_copy
+                        yield f"data: {json.dumps({'type': 'update', 'row': row_idx, 'total': len(rows), 'data': row_copy, 'status': 'error', 'error': str(e)})}\n\n"
+            
+            # Créer le CSV final (s'assurer que toutes les lignes sont traitées)
+            # Filtrer les None si nécessaire
+            final_results = [r for r in results if r is not None]
+            
+            output = io.StringIO()
+            output_fieldnames = list(fieldnames)
+            if 'email' not in output_fieldnames:
+                output_fieldnames.append('email')
+            
+            csv_writer = csv.DictWriter(output, fieldnames=output_fieldnames)
+            csv_writer.writeheader()
+            csv_writer.writerows(final_results)
+            
+            csv_output = output.getvalue()
+            
+            # Envoyer le CSV final
+            yield f"data: {json.dumps({'type': 'complete', 'csv': csv_output})}\n\n"
+            
+        except Exception as e:
+            logger.error(f"Erreur inattendue: {e}", exc_info=True)
+            yield f"data: {json.dumps({'type': 'error', 'error': str(e)})}\n\n"
+    
+    return Response(stream_with_context(generate()), mimetype='text/event-stream')
+
+# Route pour traiter un CSV (ancien endpoint, gardé pour compatibilité)
 @app.route('/api/process-csv', methods=['POST'])
 def process_csv():
     """
@@ -209,7 +384,7 @@ def process_csv():
     
     Form data:
     - file: fichier CSV (requis)
-    - max_pages: nombre max de pages par site (optionnel, défaut: 50)
+    - max_pages: nombre max de pages par site (optionnel, défaut: 10)
     - timeout: timeout en secondes (optionnel, défaut: 10)
     - url_column: nom de la colonne URL (optionnel, défaut: 'url')
     
@@ -238,18 +413,6 @@ def process_csv():
                 'message': 'Le fichier doit être un CSV (.csv)'
             }), 400
         
-        # Récupérer les paramètres optionnels
-        max_pages = request.form.get('max_pages', 50, type=int)
-        timeout = request.form.get('timeout', 10, type=int)
-        url_column = request.form.get('url_column', 'url').strip().lower()
-        
-        # Valider max_pages
-        if max_pages < 1 or max_pages > 500:
-            return jsonify({
-                'error': 'max_pages invalide',
-                'message': 'max_pages doit être entre 1 et 500'
-            }), 400
-        
         # Lire le CSV
         try:
             # Décoder le fichier
@@ -264,21 +427,7 @@ def process_csv():
                     'message': 'Le CSV est vide ou invalide'
                 }), 400
             
-            # Chercher la colonne URL (case insensitive)
-            url_col = None
-            for col in fieldnames:
-                if col.strip().lower() == url_column:
-                    url_col = col
-                    break
-            
-            if not url_col:
-                return jsonify({
-                    'error': 'Colonne URL introuvable',
-                    'message': f'La colonne "{url_column}" n\'existe pas dans le CSV',
-                    'colonnes_disponibles': list(fieldnames)
-                }), 400
-            
-            # Lire toutes les lignes
+            # Lire toutes les lignes pour la détection
             rows = list(csv_reader)
             
             if not rows:
@@ -287,41 +436,70 @@ def process_csv():
                     'message': 'Le CSV ne contient aucune ligne de données'
                 }), 400
             
-            logger.info(f"Traitement de {len(rows)} URLs depuis le CSV")
+            # Détecter automatiquement la colonne URL
+            url_col = detect_url_column(fieldnames, rows)
             
-            # Traiter chaque ligne
-            results = []
-            for idx, row in enumerate(rows, 1):
-                url = row.get(url_col, '').strip()
+            if not url_col:
+                return jsonify({
+                    'error': 'Colonne URL introuvable',
+                    'message': 'Aucune colonne contenant des URLs n\'a été détectée',
+                    'colonnes_disponibles': list(fieldnames)
+                }), 400
+            
+            logger.info(f"Traitement de {len(rows)} URLs depuis le CSV en parallèle (colonne détectée: {url_col})")
+            
+            # Préparer les résultats (thread-safe)
+            results = [None] * len(rows)
+            results_lock = threading.Lock()
+            
+            def process_row_legacy(idx: int, row: Dict, url_col: str):
+                """Fonction pour traiter une ligne de manière thread-safe (endpoint legacy)"""
+                row_copy = row.copy()
+                url = row_copy.get(url_col, '').strip()
                 
                 if not url:
-                    logger.warning(f"Ligne {idx}: URL vide, ignorée")
-                    row['email'] = ''
-                    results.append(row)
-                    continue
+                    row_copy['email'] = ''
+                    with results_lock:
+                        results[idx - 1] = row_copy
+                    return
                 
                 # Ajouter le schéma si manquant
                 if not url.startswith('http://') and not url.startswith('https://'):
                     url = 'https://' + url
                 
-                logger.info(f"Traitement ligne {idx}/{len(rows)}: {url}")
-                
                 try:
                     # Scraper l'URL
-                    finder = EmailFinder(url, max_pages=max_pages, timeout=timeout)
+                    finder = EmailFinder(url, max_pages=10, timeout=10)
                     found_emails = finder.find_emails()
                     
-                    # Joindre les emails avec des virgules
-                    email_str = ', '.join(found_emails) if found_emails else ''
-                    row['email'] = email_str
+                    # Joindre les emails avec des sauts de ligne
+                    email_str = '\n'.join(found_emails) if found_emails else ''
+                    row_copy['email'] = email_str
                     
                     logger.info(f"Ligne {idx}: {len(found_emails)} email(s) trouvé(s)")
                     
                 except Exception as e:
                     logger.error(f"Erreur lors du scraping de {url}: {e}")
-                    row['email'] = f'ERROR: {str(e)}'
+                    row_copy['email'] = f'ERROR: {str(e)}'
                 
-                results.append(row)
+                with results_lock:
+                    results[idx - 1] = row_copy
+            
+            # Traiter toutes les URLs en parallèle (batch de 100)
+            max_workers = 100
+            with ThreadPoolExecutor(max_workers=max_workers) as executor:
+                # Soumettre toutes les tâches
+                futures = []
+                for idx, row in enumerate(rows, 1):
+                    future = executor.submit(process_row_legacy, idx, row, url_col)
+                    futures.append(future)
+                
+                # Attendre que toutes les tâches soient terminées
+                for future in as_completed(futures):
+                    future.result()  # Attendre le résultat
+            
+            # Filtrer les None si nécessaire
+            final_results = [r for r in results if r is not None]
             
             # Créer le CSV de sortie
             output = io.StringIO()
@@ -333,7 +511,7 @@ def process_csv():
             
             csv_writer = csv.DictWriter(output, fieldnames=output_fieldnames)
             csv_writer.writeheader()
-            csv_writer.writerows(results)
+            csv_writer.writerows(final_results)
             
             # Préparer la réponse
             output.seek(0)
@@ -378,7 +556,15 @@ def process_csv():
 @app.route('/', methods=['GET'])
 def index():
     """Interface web pour uploader un CSV"""
-    html_template = """
+    # Lire le template depuis le fichier
+    import os
+    template_path = os.path.join(os.path.dirname(__file__), 'templates_dashboard.html')
+    try:
+        with open(template_path, 'r', encoding='utf-8') as f:
+            html_template = f.read()
+    except FileNotFoundError:
+        # Fallback si le fichier n'existe pas
+        html_template = """
 <!DOCTYPE html>
 <html lang="fr">
 <head>
@@ -721,8 +907,265 @@ def index():
     </script>
 </body>
 </html>
-    """
+        """
     return render_template_string(html_template)
+
+# Route pour autocomplete de villes
+@app.route('/api/autocomplete-city', methods=['GET'])
+def autocomplete_city():
+    """
+    Autocomplete pour les villes
+    Utilise Nominatim pour rechercher des villes
+    
+    GET params:
+    - query: Texte de recherche (requis)
+    - limit: Nombre de résultats (optionnel, défaut: 5)
+    
+    Returns:
+    JSON avec liste de suggestions de villes
+    """
+    try:
+        query = request.args.get('query', '').strip()
+        limit = request.args.get('limit', 5, type=int)
+        
+        if not query or len(query) < 2:
+            return jsonify({
+                'suggestions': []
+            }), 200
+        
+        # Utiliser Nominatim pour l'autocomplete
+        url = "https://nominatim.openstreetmap.org/search"
+        params = {
+            'q': query,
+            'format': 'json',
+            'limit': limit,
+            'addressdetails': 1,
+            'featuretype': 'city,town,village'  # Filtrer pour les villes uniquement
+        }
+        headers = {
+            'User-Agent': 'PassivLeads/1.0'
+        }
+        
+        response = requests.get(url, params=params, headers=headers, timeout=10)
+        response.raise_for_status()
+        
+        data = response.json()
+        
+        suggestions = []
+        for item in data:
+            # Construire le nom complet de la ville
+            display_name = item.get('display_name', '')
+            # Extraire juste le nom de la ville et le pays
+            name_parts = display_name.split(',')
+            city_name = name_parts[0].strip() if name_parts else display_name
+            
+            # Extraire le pays
+            country = ''
+            if len(name_parts) > 1:
+                country = name_parts[-1].strip()
+            
+            suggestions.append({
+                'name': city_name,
+                'full_name': display_name,
+                'country': country,
+                'lat': float(item.get('lat', 0)),
+                'lon': float(item.get('lon', 0)),
+                'boundingbox': item.get('boundingbox', [])
+            })
+        
+        return jsonify({
+            'suggestions': suggestions
+        }), 200
+        
+    except Exception as e:
+        logger.error(f"Erreur lors de l'autocomplete: {e}", exc_info=True)
+        return jsonify({
+            'error': 'Server error',
+            'message': 'An error occurred during autocomplete',
+            'suggestions': []
+        }), 500
+
+# Route pour géocoder une ville et obtenir son bbox avec détails
+@app.route('/api/geocode-city', methods=['GET', 'POST'])
+def geocode_city():
+    """
+    Géocode une ville et retourne ses coordonnées et bounding box
+    
+    GET params ou POST body:
+    - city: Nom de la ville (requis)
+    
+    Returns:
+    JSON avec les coordonnées et bounding box
+    """
+    try:
+        if request.method == 'POST':
+            data = request.get_json() or {}
+            city = data.get('city') or request.args.get('city')
+        else:
+            city = request.args.get('city')
+        
+        if not city:
+            return jsonify({
+                'error': 'City missing',
+                'message': 'Please provide a city name via the "city" parameter'
+            }), 400
+        
+        # Utiliser Nominatim directement pour obtenir plus de détails
+        url = "https://nominatim.openstreetmap.org/search"
+        params = {
+            'q': city,
+            'format': 'json',
+            'limit': 1,
+            'addressdetails': 1,
+            'polygon_geojson': 1  # Obtenir les polygones pour les limites
+        }
+        headers = {
+            'User-Agent': 'PassivLeads/1.0'
+        }
+        
+        response = requests.get(url, params=params, headers=headers, timeout=10)
+        response.raise_for_status()
+        
+        data = response.json()
+        if not data:
+            return jsonify({
+                'error': 'City not found',
+                'message': f'Could not geocode city: {city}'
+            }), 404
+        
+        location = data[0]
+        display_name = location.get('display_name', city)
+        
+        # Extraire la bounding box
+        if 'boundingbox' in location:
+            bbox = location['boundingbox']
+            min_lat, min_lon, max_lat, max_lon = float(bbox[0]), float(bbox[2]), float(bbox[1]), float(bbox[3])
+        elif 'lat' in location and 'lon' in location:
+            lat = float(location['lat'])
+            lon = float(location['lon'])
+            offset = 0.045
+            min_lat, min_lon, max_lat, max_lon = lat - offset, lon - offset, lat + offset, lon + offset
+        else:
+            return jsonify({
+                'error': 'City not found',
+                'message': f'Could not geocode city: {city}'
+            }), 404
+        
+        # Extraire les coordonnées du centre
+        center_lat = float(location.get('lat', (min_lat + max_lat) / 2))
+        center_lon = float(location.get('lon', (min_lon + max_lon) / 2))
+        
+        # Obtenir le polygone si disponible (pour les limites administratives)
+        geojson = location.get('geojson')
+        
+        return jsonify({
+            'success': True,
+            'city': city,
+            'display_name': display_name,
+            'bbox': {
+                'min_lat': min_lat,
+                'min_lon': min_lon,
+                'max_lat': max_lat,
+                'max_lon': max_lon
+            },
+            'center': {
+                'lat': center_lat,
+                'lon': center_lon
+            },
+            'geojson': geojson  # Polygone pour les limites administratives
+        }), 200
+        
+    except Exception as e:
+        logger.error(f"Erreur lors du geocoding: {e}", exc_info=True)
+        return jsonify({
+            'error': 'Server error',
+            'message': 'An error occurred during geocoding',
+            'details': str(e) if app.debug else None
+        }), 500
+
+# Route pour scraper OpenStreetMap avec streaming
+@app.route('/api/scrape-osm-stream', methods=['POST'])
+def scrape_osm_stream():
+    """
+    Scrape les entreprises depuis OpenStreetMap avec streaming des résultats en temps réel
+    Utilise Server-Sent Events (SSE) pour les mises à jour live
+    
+    POST body (JSON):
+    - city: Nom de la ville (requis)
+    - company_types: Liste des types d'entreprises à rechercher (requis)
+    - bbox: Bounding box optionnel [min_lat, min_lon, max_lat, max_lon]
+    """
+    def generate():
+        try:
+            data = request.get_json()
+            
+            if not data:
+                yield f"data: {json.dumps({'error': 'Invalid request', 'type': 'error'})}\n\n"
+                return
+            
+            city = data.get('city')
+            company_types = data.get('company_types', [])
+            bbox = data.get('bbox')
+            
+            if not city:
+                yield f"data: {json.dumps({'error': 'City missing', 'type': 'error'})}\n\n"
+                return
+            
+            if not company_types:
+                yield f"data: {json.dumps({'error': 'Company types missing', 'type': 'error'})}\n\n"
+                return
+            
+            # Convertir bbox en tuple si fourni
+            bbox_tuple = None
+            if bbox and isinstance(bbox, list) and len(bbox) == 4:
+                bbox_tuple = (float(bbox[0]), float(bbox[1]), float(bbox[2]), float(bbox[3]))
+            
+            # Créer le scraper
+            scraper = OSMScraper(city, bbox=bbox_tuple, timeout=30)
+            
+            # Obtenir le bbox si pas fourni
+            if not bbox_tuple:
+                yield f"data: {json.dumps({'type': 'geocoding', 'message': f'Geocoding city: {city}'})}\n\n"
+                bbox_tuple = scraper.geocode_city()
+                if not bbox_tuple:
+                    yield f"data: {json.dumps({'error': f'Could not geocode city: {city}', 'type': 'error'})}\n\n"
+                    return
+            
+            min_lat, min_lon, max_lat, max_lon = bbox_tuple
+            center_lat = (min_lat + max_lat) / 2
+            center_lon = (min_lon + max_lon) / 2
+            
+            yield f"data: {json.dumps({'type': 'init', 'city': city, 'bbox': {'min_lat': min_lat, 'min_lon': min_lon, 'max_lat': max_lat, 'max_lon': max_lon}, 'center': {'lat': center_lat, 'lon': center_lon}, 'company_types': company_types})}\n\n"
+            
+            # Scraper les entreprises
+            yield f"data: {json.dumps({'type': 'scraping', 'message': 'Scraping OpenStreetMap data...'})}\n\n"
+            
+            companies = scraper.scrape_companies(company_types)
+            
+            # Envoyer les résultats par batch pour le streaming
+            batch_size = 10
+            for i in range(0, len(companies), batch_size):
+                batch = companies[i:i + batch_size]
+                yield f"data: {json.dumps({'type': 'update', 'companies': batch, 'total': len(companies), 'processed': min(i + batch_size, len(companies))})}\n\n"
+            
+            # Créer le CSV final
+            output = io.StringIO()
+            if companies:
+                fieldnames = list(companies[0].keys())
+                csv_writer = csv.DictWriter(output, fieldnames=fieldnames)
+                csv_writer.writeheader()
+                csv_writer.writerows(companies)
+            
+            csv_output = output.getvalue()
+            
+            # Envoyer le CSV final
+            yield f"data: {json.dumps({'type': 'complete', 'total_companies': len(companies), 'csv': csv_output})}\n\n"
+            
+        except Exception as e:
+            logger.error(f"Erreur inattendue lors du scraping OSM: {e}", exc_info=True)
+            yield f"data: {json.dumps({'type': 'error', 'error': str(e)})}\n\n"
+    
+    return Response(stream_with_context(generate()), mimetype='text/event-stream')
 
 # Route pour la documentation API
 @app.route('/api', methods=['GET'])
@@ -743,7 +1186,7 @@ def api_docs():
                 'description': 'Trouver les emails sur un site web',
                 'parameters': {
                     'url': 'URL du site à scraper (requis)',
-                    'max_pages': 'Nombre maximum de pages à visiter (optionnel, défaut: 50, max: 500)',
+                    'max_pages': 'Nombre maximum de pages à visiter (optionnel, défaut: 10, max: 500)',
                     'timeout': 'Timeout en secondes (optionnel, défaut: 10)'
                 },
                 'examples': [
@@ -762,7 +1205,7 @@ def api_docs():
                 },
                 'example': {
                     'url': 'https://example.com',
-                    'max_pages': 50
+                    'max_pages': 10
                 }
             },
             'process_csv': {
@@ -772,7 +1215,7 @@ def api_docs():
                 'content_type': 'multipart/form-data',
                 'parameters': {
                     'file': 'Fichier CSV avec colonne "url" (requis)',
-                    'max_pages': 'Nombre maximum de pages par site (optionnel, défaut: 50)',
+                    'max_pages': 'Nombre maximum de pages par site (optionnel, défaut: 10)',
                     'timeout': 'Timeout en secondes (optionnel, défaut: 10)',
                     'url_column': 'Nom de la colonne URL (optionnel, défaut: "url")'
                 },
@@ -785,6 +1228,6 @@ def api_docs():
 if __name__ == '__main__':
     # Configuration pour le développement
     import os
-    port = int(os.environ.get('PORT', 5000))
+    port = int(os.environ.get('PORT', 5001))
     app.run(host='0.0.0.0', port=port, debug=False)
 

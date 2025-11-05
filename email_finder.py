@@ -10,6 +10,8 @@ from typing import Set, List, Dict, Tuple, Optional, Any
 import requests
 from bs4 import BeautifulSoup
 from collections import deque
+from concurrent.futures import ThreadPoolExecutor, as_completed
+import threading
 
 # Configuration du logging
 logging.basicConfig(
@@ -22,7 +24,7 @@ logger = logging.getLogger(__name__)
 class EmailFinder:
     """Bot pour trouver tous les emails sur un site web"""
     
-    def __init__(self, base_url: str, max_pages: int = 100, timeout: int = 10):
+    def __init__(self, base_url: str, max_pages: int = 10, timeout: int = 10, max_workers: int = 20):
         """
         Initialise le bot
         
@@ -36,6 +38,7 @@ class EmailFinder:
         self.domain = f"{parsed_url.scheme}://{parsed_url.netloc}"
         self.max_pages = max_pages
         self.timeout = timeout
+        self.max_workers = max_workers  # Nombre de threads pour le scraping parallèle
         
         # Pages visitées et à visiter
         self.visited_urls: Set[str] = set()
@@ -43,6 +46,9 @@ class EmailFinder:
         
         # Emails trouvés
         self.emails: Set[str] = set()
+        
+        # Lock pour la synchronisation des threads
+        self.lock = threading.Lock()
         
         # Pages importantes à parser en priorité
         self.important_keywords = [
@@ -222,23 +228,65 @@ class EmailFinder:
         
         return emails_found, soup
     
+    def _scrape_page_thread_safe(self, url: str) -> Tuple[Set[str], Optional[BeautifulSoup], List[str]]:
+        """
+        Scrape une page de manière thread-safe et retourne les emails, soup et liens
+        
+        Returns:
+            Tuple (emails, soup, links)
+        """
+        emails_found, soup = self.scrape_page(url)
+        links = []
+        
+        if soup:
+            links = self.extract_links(soup, url)
+        
+        return emails_found, soup, links
+    
     def crawl(self) -> Dict[str, Any]:
         """
-        Crawl le site web et trouve tous les emails
+        Crawl le site web et trouve tous les emails en parallèle
         
         Returns:
             Dictionnaire avec les résultats
         """
-        logger.info(f"Début du crawl de {self.base_url}")
+        logger.info(f"Début du crawl parallèle de {self.base_url} (max {self.max_pages} pages, {self.max_workers} workers)")
         
         pages_scraped = 0
         important_pages_found = []
         
         # Prioriser les pages importantes
         important_urls = []
-        normal_urls = []
         
-        while (self.to_visit or important_urls) and pages_scraped < self.max_pages:
+        # Première passe : scraper la page d'accueil pour découvrir les liens
+        urls_to_scrape = []
+        normalized_base = self.normalize_url(self.base_url)
+        urls_to_scrape.append(normalized_base)
+        self.visited_urls.add(normalized_base)
+        
+        # Scraper la première page pour découvrir les liens
+        emails_found, soup = self.scrape_page(normalized_base)
+        with self.lock:
+            self.emails.update(emails_found)
+            pages_scraped += 1
+            if self.is_important_page(normalized_base):
+                important_pages_found.append(normalized_base)
+        
+        # Extraire les liens de la première page
+        if soup:
+            links = self.extract_links(soup, normalized_base)
+            for link in links:
+                normalized_link = self.normalize_url(link)
+                if normalized_link not in self.visited_urls:
+                    if self.is_important_page(normalized_link):
+                        if normalized_link not in important_urls:
+                            important_urls.append(normalized_link)
+                    else:
+                        if normalized_link not in self.to_visit:
+                            self.to_visit.append(normalized_link)
+        
+        # Collecter les URLs jusqu'à atteindre max_pages (déjà 1 page scrapée)
+        while len(urls_to_scrape) < self.max_pages and (self.to_visit or important_urls):
             # Traiter d'abord les pages importantes
             if important_urls:
                 current_url = important_urls.pop(0)
@@ -249,35 +297,65 @@ class EmailFinder:
             
             normalized_url = self.normalize_url(current_url)
             
-            # Skip si déjà visité
-            if normalized_url in self.visited_urls:
+            # Skip si déjà visité ou déjà dans la liste
+            if normalized_url in self.visited_urls or normalized_url in urls_to_scrape:
                 continue
             
             self.visited_urls.add(normalized_url)
+            urls_to_scrape.append(normalized_url)
             
-            # Scraper la page (récupère le soup en même temps)
-            emails_found, soup = self.scrape_page(normalized_url)
-            self.emails.update(emails_found)
+            # Si on a atteint la limite, arrêter
+            if len(urls_to_scrape) >= self.max_pages:
+                break
+        
+        # Limiter à max_pages (on a déjà scrapé la première page)
+        urls_to_scrape = urls_to_scrape[1:]  # Retirer la première page déjà scrapée
+        
+        # Scraper toutes les pages restantes en parallèle
+        if urls_to_scrape:
+            logger.info(f"Scraping de {len(urls_to_scrape)} pages supplémentaires en parallèle (1 page déjà scrapée)...")
             
-            pages_scraped += 1
-            
-            # Marquer les pages importantes
-            if self.is_important_page(normalized_url):
-                important_pages_found.append(normalized_url)
-            
-            # Extraire les liens pour continuer le crawl (utilise le soup déjà récupéré)
-            if soup:
-                links = self.extract_links(soup, normalized_url)
+            with ThreadPoolExecutor(max_workers=self.max_workers) as executor:
+                # Soumettre toutes les tâches
+                future_to_url = {
+                    executor.submit(self._scrape_page_thread_safe, url): url 
+                    for url in urls_to_scrape
+                }
                 
-                for link in links:
-                    normalized_link = self.normalize_url(link)
-                    if normalized_link not in self.visited_urls:
-                        if self.is_important_page(normalized_link):
-                            if normalized_link not in important_urls:
-                                important_urls.append(normalized_link)
-                        else:
-                            if normalized_link not in self.to_visit:
-                                self.to_visit.append(normalized_link)
+                # Traiter les résultats au fur et à mesure
+                for future in as_completed(future_to_url):
+                    url = future_to_url[future]
+                    normalized_url = self.normalize_url(url)
+                    
+                    try:
+                        emails_found, soup, links = future.result()
+                        
+                        # Mettre à jour les emails de manière thread-safe
+                        with self.lock:
+                            self.emails.update(emails_found)
+                            pages_scraped += 1
+                            
+                            # Marquer les pages importantes
+                            if self.is_important_page(normalized_url):
+                                important_pages_found.append(normalized_url)
+                            
+                            # Collecter les nouveaux liens pour un potentiel second passage
+                            for link in links:
+                                normalized_link = self.normalize_url(link)
+                                if normalized_link not in self.visited_urls:
+                                    if self.is_important_page(normalized_link):
+                                        if normalized_link not in important_urls:
+                                            important_urls.append(normalized_link)
+                                    else:
+                                        if normalized_link not in self.to_visit:
+                                            self.to_visit.append(normalized_link)
+                        
+                        logger.info(f"✓ Page {pages_scraped}/{len(urls_to_scrape)+1}: {normalized_url} - {len(emails_found)} email(s) trouvé(s)")
+                        
+                    except Exception as e:
+                        logger.error(f"Erreur lors du scraping de {url}: {e}")
+        else:
+            logger.info("Aucune page supplémentaire à scraper")
         
         logger.info(f"Crawl terminé. {pages_scraped} pages visitées, {len(self.emails)} emails trouvés")
         
