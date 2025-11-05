@@ -97,7 +97,7 @@ Pages importantes visitées:
 
 ## API Web (Flask)
 
-Le bot peut également être déployé comme une API web accessible via HTTP.
+Le bot peut également être déployé comme une API web accessible via HTTP avec une interface web pour uploader des CSV.
 
 ### Démarrage local de l'API
 
@@ -106,6 +106,16 @@ python app.py
 ```
 
 L'API sera accessible sur `http://localhost:5000`
+
+### Interface Web
+
+Une fois l'API démarrée, accédez à `http://localhost:5000` (ou l'URL de votre déploiement Render) pour utiliser l'interface web interactive :
+
+- **Upload de CSV** : Glissez-déposez ou sélectionnez un fichier CSV
+- **Paramètres configurables** : Pages max, timeout, nom de colonne URL
+- **Téléchargement automatique** : Le CSV avec les emails est téléchargé automatiquement
+
+L'interface web est entièrement fonctionnelle et permet de traiter vos CSV sans avoir à écrire du code !
 
 ### Endpoints disponibles
 
@@ -141,6 +151,50 @@ curl "https://votre-api.onrender.com/api/find-emails/https://hanae-restaurant.ch
   "max_pages": 50,
   "timeout": 10
 }
+```
+
+#### 6. Traiter un CSV (POST)
+- **POST** `/api/process-csv`
+- Form data:
+  - `file`: fichier CSV avec colonne "url" (requis)
+  - `max_pages`: nombre max de pages par site (optionnel, défaut: 50)
+  - `timeout`: timeout en secondes (optionnel, défaut: 10)
+  - `url_column`: nom de la colonne URL (optionnel, défaut: "url")
+
+Exemple avec curl :
+```bash
+curl -X POST -F "file=@urls.csv" \
+  -F "max_pages=50" \
+  https://votre-api.onrender.com/api/process-csv \
+  -o results_with_emails.csv
+```
+
+Exemple avec Python :
+```python
+import requests
+
+url = "https://votre-api.onrender.com/api/process-csv"
+with open('urls.csv', 'rb') as f:
+    files = {'file': f}
+    data = {'max_pages': 50}
+    response = requests.post(url, files=files, data=data)
+    
+    with open('results.csv', 'wb') as out:
+        out.write(response.content)
+```
+
+**Format CSV d'entrée** :
+```csv
+url,name
+https://hanae-restaurant.ch/,Hanae Restaurant
+https://example.com,Example Site
+```
+
+**Format CSV de sortie** :
+```csv
+url,name,email
+https://hanae-restaurant.ch/,Hanae Restaurant,info@hanae-restaurant.ch
+https://example.com,Example Site,contact@example.com
 ```
 
 ### Réponse API
